@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install aiohttp ipwhois countryinfo
+          pip install aiohttp ipwhois beautifulsoup4
 
       - name: Run Scan Script
         run: python scripts/scan_proxyip.py
