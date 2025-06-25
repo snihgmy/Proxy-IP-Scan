@@ -1,0 +1,33 @@
+name: Proxy IP Scan
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # 每6小时运行一次
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install aiohttp ipwhois countryinfo
+
+      - name: Run Scan Script
+        run: python scripts/scan_proxyip.py
+
+      - name: Commit Results
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add fastip.txt slowip.txt chatgpt.txt cloudflare.txt
+          git commit -m "Update IP scan results"
+          git push
