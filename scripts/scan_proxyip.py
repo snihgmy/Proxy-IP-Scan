@@ -1,13 +1,12 @@
 import asyncio
 import aiohttp
-from bs4 import BeautifulSoup
 import re
 from ipwhois import IPWhois
 import socket
 import os
 
-MIN_SPEED_MBPS = 1  # 速度阈值：1MB/s
-
+# ---------------- 参数配置 ----------------
+MIN_SPEED_MBPS = 1
 WORKER_BASE_URL = "https://pipscan.amwsuhje.workers.dev/?target="
 
 TARGET_URLS = [
@@ -17,6 +16,8 @@ TARGET_URLS = [
 
 ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 
+
+# ---------------- 抓取 IP ----------------
 async def fetch_ips():
     ips = set()
     async with aiohttp.ClientSession() as session:
@@ -25,31 +26,26 @@ async def fetch_ips():
             try:
                 async with session.get(proxy_url, timeout=15) as resp:
                     html = await resp.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    # 两个网站可能结构不一样，优先找<tr>，没有找<li>
-                    elements = soup.find_all('tr')
-                    if not elements:
-                        elements = soup.find_all('li')
-                    for el in elements:
-                        text = el.get_text()
-                        found_ips = ip_pattern.findall(text)
-                        for ip in found_ips:
-                            # 验证是否是合法IP，避免抓取错误字符串
-                            try:
-                                socket.inet_aton(ip)
-                                ips.add(ip)
-                            except:
-                                continue
+
+                    # ✅ 忽略标签，直接匹配 IP
+                    found_ips = ip_pattern.findall(html)
+                    for ip in found_ips:
+                        try:
+                            socket.inet_aton(ip)
+                            ips.add(ip)
+                        except:
+                            continue
             except Exception as e:
                 print(f"[WARN] 抓取失败 {real_url}: {e}")
 
     all_ips = sorted(ips)
-    # 写入ip.txt，方便查看抓取结果
     with open("ip.txt", "w") as f:
         f.write("\n".join(all_ips))
     print(f"[INFO] 抓取到 {len(all_ips)} 个 IP，已写入 ip.txt")
     return all_ips
 
+
+# ---------------- 查询国家 ----------------
 def get_country(ip):
     try:
         obj = IPWhois(ip)
@@ -58,6 +54,8 @@ def get_country(ip):
     except:
         return "ZZ"
 
+
+# ---------------- 可访问性测试 ----------------
 async def is_accessible(ip, host):
     url = f"http://{ip}"
     headers = {"Host": host}
@@ -68,6 +66,8 @@ async def is_accessible(ip, host):
     except:
         return False
 
+
+# ---------------- 简易测速 ----------------
 async def test_speed(ip):
     try:
         reader, writer = await asyncio.wait_for(
@@ -85,6 +85,8 @@ async def test_speed(ip):
     except:
         return 0
 
+
+# ---------------- 文件输出 ----------------
 def write_by_region(filename, data_dict):
     with open(filename, "w") as f:
         for region in sorted(data_dict.keys()):
@@ -93,6 +95,8 @@ def write_by_region(filename, data_dict):
                 f.write(ip + "\n")
             f.write("\n")
 
+
+# ---------------- 主程序 ----------------
 async def main():
     os.makedirs("output", exist_ok=True)
     ip_list = await fetch_ips()
