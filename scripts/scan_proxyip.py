@@ -5,7 +5,7 @@ import socket
 from ipwhois import IPWhois
 import os
 
-MIN_SPEED_MBPS = 1  # 阈值1MB/s
+MIN_SPEED_MBPS = 1  # 1MB/s
 
 # ---------- 抓取 nslookup.io ----------
 async def fetch_from_nslookup():
@@ -43,11 +43,18 @@ async def fetch_from_ipdb():
                 continue
     return list(ips)
 
-# ---------- 合并 IP ----------
+# ---------- 合并并保存 IP ----------
 async def fetch_ips():
     ip1 = await fetch_from_nslookup()
     ip2 = await fetch_from_ipdb()
-    return list(set(ip1 + ip2))
+    all_ips = sorted(set(ip1 + ip2))
+    
+    # 写入 ip.txt
+    with open("ip.txt", "w") as f:
+        f.write("\n".join(all_ips))
+    print(f"[INFO] 抓取到 IP 数量：{len(all_ips)}，已保存到 ip.txt")
+
+    return all_ips
 
 # ---------- 判断国家 ----------
 def get_country(ip):
@@ -58,7 +65,7 @@ def get_country(ip):
     except:
         return "ZZ"
 
-# ---------- 判断 IP 是否能访问某站 ----------
+# ---------- 判断是否能访问某站 ----------
 async def is_accessible(ip, target_host):
     url = f"http://{ip}"
     headers = {"Host": target_host}
@@ -69,7 +76,7 @@ async def is_accessible(ip, target_host):
     except:
         return False
 
-# ---------- 简单测速 ----------
+# ---------- 测速 ----------
 async def test_speed(ip):
     try:
         reader, writer = await asyncio.wait_for(
@@ -78,7 +85,7 @@ async def test_speed(ip):
         writer.write(b"GET / HTTP/1.1\r\nHost: cloudflare.com\r\n\r\n")
         await writer.drain()
         start = asyncio.get_event_loop().time()
-        data = await reader.read(1024 * 100)  # 100KB
+        data = await reader.read(1024 * 100)
         end = asyncio.get_event_loop().time()
         writer.close()
         await writer.wait_closed()
@@ -107,15 +114,15 @@ async def main():
     cloudflare_only = {}
 
     for ip in ip_list:
-        print(f"检查：{ip}")
+        print(f"[DEBUG] 检查 IP：{ip}")
         country = get_country(ip)
-
         cg = await is_accessible(ip, "chatgpt.com")
         cf = await is_accessible(ip, "cloudflare.com")
+        print(f"[DEBUG] chatgpt: {cg}, cloudflare: {cf}")
 
         if cg and cf:
             speed = await test_speed(ip)
-            print(f"  速度: {speed:.2f} Mbps")
+            print(f"[DEBUG] 速度: {speed:.2f} Mbps")
             if speed >= MIN_SPEED_MBPS:
                 fast.setdefault(country, []).append(ip)
             else:
