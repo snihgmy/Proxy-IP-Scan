@@ -1,74 +1,66 @@
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
-import socket
+import re
 from ipwhois import IPWhois
+import socket
 import os
 
-MIN_SPEED_MBPS = 1  # 1MB/s
+MIN_SPEED_MBPS = 1  # 速度阈值：1MB/s
 
-# ---------- 抓取 nslookup.io ----------
-async def fetch_from_nslookup():
-    url = "https://www.nslookup.io/domains/bpb.yousef.isegaro.com/dns-records/"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            text = await resp.text()
-    soup = BeautifulSoup(text, 'html.parser')
-    ips = set()
-    for row in soup.select("table tr"):
-        cols = row.find_all("td")
-        if cols and len(cols) >= 2:
-            ip = cols[1].text.strip()
-            try:
-                socket.inet_aton(ip)
-                ips.add(ip)
-            except:
-                continue
-    return list(ips)
+WORKER_BASE_URL = "https://pipscan.amwsuhje.workers.dev/?target="
 
-# ---------- 抓取 ipdb.030101.xyz ----------
-async def fetch_from_ipdb():
-    url = "https://ipdb.030101.xyz/bestproxy/"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            text = await resp.text()
-    ips = set()
-    for line in text.splitlines():
-        if line.count(".") == 3:
-            ip = line.strip().split(":")[0]
-            try:
-                socket.inet_aton(ip)
-                ips.add(ip)
-            except:
-                continue
-    return list(ips)
+TARGET_URLS = [
+    "https://www.nslookup.io/domains/bpb.yousef.isegaro.com/dns-records/",
+    "https://ipdb.030101.xyz/bestproxy/"
+]
 
-# ---------- 合并并保存 IP ----------
+ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+
 async def fetch_ips():
-    ip1 = await fetch_from_nslookup()
-    ip2 = await fetch_from_ipdb()
-    all_ips = sorted(set(ip1 + ip2))
-    
-    # 写入 ip.txt
+    ips = set()
+    async with aiohttp.ClientSession() as session:
+        for real_url in TARGET_URLS:
+            proxy_url = WORKER_BASE_URL + real_url
+            try:
+                async with session.get(proxy_url, timeout=15) as resp:
+                    html = await resp.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    # 两个网站可能结构不一样，优先找<tr>，没有找<li>
+                    elements = soup.find_all('tr')
+                    if not elements:
+                        elements = soup.find_all('li')
+                    for el in elements:
+                        text = el.get_text()
+                        found_ips = ip_pattern.findall(text)
+                        for ip in found_ips:
+                            # 验证是否是合法IP，避免抓取错误字符串
+                            try:
+                                socket.inet_aton(ip)
+                                ips.add(ip)
+                            except:
+                                continue
+            except Exception as e:
+                print(f"[WARN] 抓取失败 {real_url}: {e}")
+
+    all_ips = sorted(ips)
+    # 写入ip.txt，方便查看抓取结果
     with open("ip.txt", "w") as f:
         f.write("\n".join(all_ips))
-    print(f"[INFO] 抓取到 IP 数量：{len(all_ips)}，已保存到 ip.txt")
-
+    print(f"[INFO] 抓取到 {len(all_ips)} 个 IP，已写入 ip.txt")
     return all_ips
 
-# ---------- 判断国家 ----------
 def get_country(ip):
     try:
         obj = IPWhois(ip)
-        res = obj.lookup_rdap()
+        res = obj.lookup_rdap(depth=1)
         return res["network"]["country"] or "ZZ"
     except:
         return "ZZ"
 
-# ---------- 判断是否能访问某站 ----------
-async def is_accessible(ip, target_host):
+async def is_accessible(ip, host):
     url = f"http://{ip}"
-    headers = {"Host": target_host}
+    headers = {"Host": host}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6)) as session:
             async with session.get(url, headers=headers) as resp:
@@ -76,11 +68,10 @@ async def is_accessible(ip, target_host):
     except:
         return False
 
-# ---------- 测速 ----------
 async def test_speed(ip):
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, 443), timeout=4
+            asyncio.open_connection(ip, 443), timeout=5
         )
         writer.write(b"GET / HTTP/1.1\r\nHost: cloudflare.com\r\n\r\n")
         await writer.drain()
@@ -94,7 +85,6 @@ async def test_speed(ip):
     except:
         return 0
 
-# ---------- 写入文件 ----------
 def write_by_region(filename, data_dict):
     with open(filename, "w") as f:
         for region in sorted(data_dict.keys()):
@@ -103,7 +93,6 @@ def write_by_region(filename, data_dict):
                 f.write(ip + "\n")
             f.write("\n")
 
-# ---------- 主程序 ----------
 async def main():
     os.makedirs("output", exist_ok=True)
     ip_list = await fetch_ips()
