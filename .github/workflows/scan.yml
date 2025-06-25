@@ -19,6 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install aiohttp ipwhois beautifulsoup4
 
       - name: Run Scan Script
